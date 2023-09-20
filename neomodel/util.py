@@ -41,24 +41,6 @@ def ensure_connection(func):
     return wrapper
 
 
-def change_neo4j_password(db, user, new_password):
-    db.cypher_query(f"ALTER USER {user} SET PASSWORD '{new_password}'")
-
-
-def clear_neo4j_database(db, clear_constraints=False, clear_indexes=False):
-    db.cypher_query(
-        """
-        MATCH (a)
-        CALL { WITH a DETACH DELETE a }
-        IN TRANSACTIONS OF 5000 rows
-    """
-    )
-    if clear_constraints:
-        core.drop_constraints()
-    if clear_indexes:
-        core.drop_indexes()
-
-
 class Database(local):
     """
     A singleton object via which all operations from neomodel to the Neo4j backend are handled with.
@@ -180,6 +162,69 @@ class Database(local):
                 "Impersonation is only available in Neo4j Enterprise edition"
             )
         return ImpersonationHandler(self, impersonated_user=user)
+
+    @ensure_connection
+    def drop_constraints(self, quiet=True, stdout=None):
+        """
+        Discover and drop all constraints.
+        """
+        if not stdout or stdout is None:
+            stdout = sys.stdout
+    
+        results, meta = self.cypher_query("SHOW CONSTRAINTS")
+    
+        results_as_dict = [dict(zip(meta, row)) for row in results]
+        for constraint in results_as_dict:
+            self.cypher_query("DROP CONSTRAINT " + constraint["name"])
+            if not quiet:
+                stdout.write(
+                    (
+                        " - Dropping unique constraint and index"
+                        f" on label {constraint['labelsOrTypes'][0]}"
+                        f" with property {constraint['properties'][0]}.\n"
+                    )
+                )
+        if not quiet:
+            stdout.write("\n")
+    
+    
+    @ensure_connection
+    def drop_indexes(quiet=True, stdout=None):
+        """
+        Discover and drop all indexes, except the automatically created token lookup indexes.
+        """
+        if not stdout or stdout is None:
+            stdout = sys.stdout
+    
+        indexes = db.list_indexes(exclude_token_lookup=True)
+        for index in indexes:
+            db.cypher_query("DROP INDEX " + index["name"])
+            if not quiet:
+                stdout.write(
+                    f' - Dropping index on labels {",".join(index["labelsOrTypes"])} with properties {",".join(index["properties"])}.\n'
+                )
+        if not quiet:
+            stdout.write("\n")
+
+
+    @ensure_connection
+    def change_neo4j_password(self, user, new_password):
+        self.cypher_query(f"ALTER USER {user} SET PASSWORD '{new_password}'")
+
+    @ensure_connection
+    def clear_neo4j_database(self, clear_constraints=False, clear_indexes=False):
+        self.cypher_query(
+            """
+            MATCH (a)
+            CALL { WITH a DETACH DELETE a }
+            IN TRANSACTIONS OF 5000 rows
+            """
+            )
+        if clear_constraints:
+            self.drop_constraints()
+
+        if clear_indexes:
+            self.drop_indexes()
 
     @ensure_connection
     def begin(self, access_mode=None, **parameters):

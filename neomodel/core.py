@@ -18,54 +18,6 @@ CONSTRAINT_ALREADY_EXISTS = "Neo.ClientError.Schema.ConstraintAlreadyExists"
 STREAMING_WARNING = "streaming is not supported by bolt, please remove the kwarg"
 
 
-def drop_constraints(quiet=True, stdout=None):
-    """
-    Discover and drop all constraints.
-
-    :type: bool
-    :return: None
-    """
-    if not stdout or stdout is None:
-        stdout = sys.stdout
-
-    results, meta = db.cypher_query("SHOW CONSTRAINTS")
-
-    results_as_dict = [dict(zip(meta, row)) for row in results]
-    for constraint in results_as_dict:
-        db.cypher_query("DROP CONSTRAINT " + constraint["name"])
-        if not quiet:
-            stdout.write(
-                (
-                    " - Dropping unique constraint and index"
-                    f" on label {constraint['labelsOrTypes'][0]}"
-                    f" with property {constraint['properties'][0]}.\n"
-                )
-            )
-    if not quiet:
-        stdout.write("\n")
-
-
-def drop_indexes(quiet=True, stdout=None):
-    """
-    Discover and drop all indexes, except the automatically created token lookup indexes.
-
-    :type: bool
-    :return: None
-    """
-    if not stdout or stdout is None:
-        stdout = sys.stdout
-
-    indexes = db.list_indexes(exclude_token_lookup=True)
-    for index in indexes:
-        db.cypher_query("DROP INDEX " + index["name"])
-        if not quiet:
-            stdout.write(
-                f' - Dropping index on labels {",".join(index["labelsOrTypes"])} with properties {",".join(index["properties"])}.\n'
-            )
-    if not quiet:
-        stdout.write("\n")
-
-
 def remove_all_labels(stdout=None):
     """
     Calls functions for dropping constraints and indexes.

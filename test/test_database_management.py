@@ -8,7 +8,6 @@ from neomodel import (
     StructuredNode,
     StructuredRel,
     db,
-    util,
 )
 
 
@@ -32,7 +31,7 @@ def test_clear_database():
     venue.in_city.connect(city)
 
     # Clear only the data
-    util.clear_neo4j_database(db)
+    db.clear_neo4j_database()
     database_is_populated, _ = db.cypher_query(
         "MATCH (a) return count(a)>0 as database_is_populated"
     )
@@ -45,7 +44,7 @@ def test_clear_database():
     assert len(constraints) > 0
 
     # Clear constraints and indexes too
-    util.clear_neo4j_database(db, clear_constraints=True, clear_indexes=True)
+    db.clear_neo4j_database(clear_constraints=True, clear_indexes=True)
 
     indexes = db.list_indexes(exclude_token_lookup=True)
     constraints = db.list_constraints()
@@ -59,7 +58,7 @@ def test_change_password():
     prev_url = f"bolt://neo4j:{prev_password}@localhost:7687"
     new_url = f"bolt://neo4j:{new_password}@localhost:7687"
 
-    util.change_neo4j_password(db, "neo4j", new_password)
+    db.change_neo4j_password("neo4j", new_password)
 
     db.set_connection(new_url)
 
@@ -67,5 +66,5 @@ def test_change_password():
         db.set_connection(prev_url)
 
     db.set_connection(new_url)
-    util.change_neo4j_password(db, "neo4j", prev_password)
+    db.change_neo4j_password("neo4j", prev_password)
     db.set_connection(prev_url)
