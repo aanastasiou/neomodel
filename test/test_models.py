@@ -9,7 +9,6 @@ from neomodel import (
     IntegerProperty,
     StringProperty,
     StructuredNode,
-    install_labels,
 )
 from neomodel.core import db
 from neomodel.exceptions import RequiredProperty, UniqueProperty
@@ -112,7 +111,7 @@ def test_save_node_without_properties():
 
 
 def test_unique():
-    install_labels(User)
+    db.install_labels(User)
     User(email="jim1@test.com", age=3).save()
     with raises(UniqueProperty):
         User(email="jim1@test.com", age=3).save()

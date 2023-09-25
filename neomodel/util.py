@@ -164,20 +164,20 @@ class Database(local):
         return ImpersonationHandler(self, impersonated_user=user)
 
     @ensure_connection
-    def drop_constraints(self, quiet=True, stdout=None):
+    def drop_constraints(self, quiet=True, io_stream=None):
         """
         Discover and drop all constraints.
         """
-        if not stdout or stdout is None:
-            stdout = sys.stdout
+        if not io_stream or io_stream is None:
+            io_stream = sys.stdout
     
         results, meta = self.cypher_query("SHOW CONSTRAINTS")
     
         results_as_dict = [dict(zip(meta, row)) for row in results]
         for constraint in results_as_dict:
-            self.cypher_query("DROP CONSTRAINT " + constraint["name"])
+            self.cypher_query(f"DROP CONSTRAINT {constraint['name']}")
             if not quiet:
-                stdout.write(
+                io_stream.write(
                     (
                         " - Dropping unique constraint and index"
                         f" on label {constraint['labelsOrTypes'][0]}"
@@ -185,26 +185,212 @@ class Database(local):
                     )
                 )
         if not quiet:
-            stdout.write("\n")
+            io_stream.write("\n")
     
     
     @ensure_connection
-    def drop_indexes(quiet=True, stdout=None):
+    def drop_indexes(quiet=True, io_stream=None):
         """
         Discover and drop all indexes, except the automatically created token lookup indexes.
+        """
+        if not io_stream or io_stream is None:
+            io_stream = sys.stdout
+    
+        indexes = self.list_indexes(exclude_token_lookup=True)
+        for index in indexes:
+            self.cypher_query(f"DROP INDEX {index['name']}")
+            if not quiet:
+                io_stream.write(
+                    f' - Dropping index on labels {",".join(index["labelsOrTypes"])} with properties {",".join(index["properties"])}.\n'
+                )
+        if not quiet:
+            io_stream.write("\n")
+
+    @ensure_connection
+    def remove_all_labels(quiet=True, io_stream=None):
+        """
+        Calls functions for dropping constraints and indexes.
+    
+        :param io_stream: output stream
+        :return: None
+        """
+        io_stream = io_stream or sys.stdout
+
+        io_stream.write("Dropping constraints...\n")
+        self.drop_constraints(quiet, io_stream)
+    
+        io_stream.write("Dropping indexes...\n")
+        self.drop_indexes(quiet, io_stream)
+
+
+    def remove_all_labels(stdout=None):
+        """
+        Calls functions for dropping constraints and indexes.
+    
+        :param stdout: output stream
+        :return: None
+        """
+    
+        if not stdout:
+            stdout = sys.stdout
+    
+        stdout.write("Dropping constraints...\n")
+        drop_constraints(quiet=False, stdout=stdout)
+    
+        stdout.write("Dropping indexes...\n")
+        drop_indexes(quiet=False, stdout=stdout)
+    
+    
+    def install_labels(cls, quiet=True, stdout=None):
+        """
+        Setup labels with indexes and constraints for a given class
+    
+        :param cls: StructuredNode class
+        :type: class
+        :param quiet: (default true) enable standard output
+        :param stdout: stdout stream
+        :type: bool
+        :return: None
         """
         if not stdout or stdout is None:
             stdout = sys.stdout
     
-        indexes = db.list_indexes(exclude_token_lookup=True)
-        for index in indexes:
-            db.cypher_query("DROP INDEX " + index["name"])
+        if not hasattr(cls, "__label__"):
             if not quiet:
                 stdout.write(
-                    f' - Dropping index on labels {",".join(index["labelsOrTypes"])} with properties {",".join(index["properties"])}.\n'
+                    f" ! Skipping class {cls.__module__}.{cls.__name__} is abstract\n"
                 )
-        if not quiet:
+            return
+    
+        for name, property in cls.defined_properties(aliases=False, rels=False).items():
+            _install_node(cls, name, property, quiet, stdout)
+    
+        for _, relationship in cls.defined_properties(
+            aliases=False, rels=True, properties=False
+        ).items():
+            _install_relationship(cls, relationship, quiet, stdout)
+    
+    
+    def _create_node_index(label: str, property_name: str, stdout):
+        try:
+            db.cypher_query(
+                f"CREATE INDEX index_{label}_{property_name} FOR (n:{label}) ON (n.{property_name}); "
+            )
+        except ClientError as e:
+            if e.code in (
+                RULE_ALREADY_EXISTS,
+                INDEX_ALREADY_EXISTS,
+            ):
+                stdout.write(f"{str(e)}\n")
+            else:
+                raise
+    
+    
+    def _create_node_constraint(label: str, property_name: str, stdout):
+        try:
+            db.cypher_query(
+                f"""CREATE CONSTRAINT constraint_unique_{label}_{property_name} 
+                            FOR (n:{label}) REQUIRE n.{property_name} IS UNIQUE"""
+            )
+        except ClientError as e:
+            if e.code in (
+                RULE_ALREADY_EXISTS,
+                CONSTRAINT_ALREADY_EXISTS,
+            ):
+                stdout.write(f"{str(e)}\n")
+            else:
+                raise
+    
+    
+    def _create_relationship_index(relationship_type: str, property_name: str, stdout):
+        try:
+            db.cypher_query(
+                f"CREATE INDEX index_{relationship_type}_{property_name} FOR ()-[r:{relationship_type}]-() ON (r.{property_name}); "
+            )
+        except ClientError as e:
+            if e.code in (
+                RULE_ALREADY_EXISTS,
+                INDEX_ALREADY_EXISTS,
+            ):
+                stdout.write(f"{str(e)}\n")
+            else:
+                raise
+    
+    
+    def _install_node(cls, name, property, quiet, stdout):
+        # Create indexes and constraints for node property
+        db_property = property.db_property or name
+        if property.index:
+            if not quiet:
+                stdout.write(
+                    f" + Creating node index {name} on label {cls.__label__} for class {cls.__module__}.{cls.__name__}\n"
+                )
+            _create_node_index(
+                label=cls.__label__, property_name=db_property, stdout=stdout
+            )
+    
+        elif property.unique_index:
+            if not quiet:
+                stdout.write(
+                    f" + Creating node unique constraint for {name} on label {cls.__label__} for class {cls.__module__}.{cls.__name__}\n"
+                )
+            _create_node_constraint(
+                label=cls.__label__, property_name=db_property, stdout=stdout
+            )
+    
+    
+    def _install_relationship(cls, relationship, quiet, stdout):
+        # Create indexes and constraints for relationship property
+        relationship_cls = relationship.definition["model"]
+        if relationship_cls is not None:
+            relationship_type = relationship.definition["relation_type"]
+            for prop_name, property in relationship_cls.defined_properties(
+                aliases=False, rels=False
+            ).items():
+                db_property = property.db_property or prop_name
+                if property.index:
+                    if not quiet:
+                        stdout.write(
+                            f" + Creating relationship index {prop_name} on relationship type {relationship_type} for relationship model {cls.__module__}.{relationship_cls.__name__}\n"
+                        )
+                    _create_relationship_index(
+                        relationship_type=relationship_type,
+                        property_name=db_property,
+                        stdout=stdout,
+                    )
+    
+    
+    def install_all_labels(stdout=None):
+        """
+        Discover all subclasses of StructuredNode in your application and execute install_labels on each.
+        Note: code must be loaded (imported) in order for a class to be discovered.
+    
+        :param stdout: output stream
+        :return: None
+        """
+    
+        if not stdout or stdout is None:
+            stdout = sys.stdout
+    
+        def subsub(cls):  # recursively return all subclasses
+            subclasses = cls.__subclasses__()
+            if not subclasses:  # base case: no more subclasses
+                return []
+            return subclasses + [g for s in cls.__subclasses__() for g in subsub(s)]
+    
+        stdout.write("Setting up indexes and constraints...\n\n")
+    
+        i = 0
+        for cls in subsub(StructuredNode):
+            stdout.write(f"Found {cls.__module__}.{cls.__name__}\n")
+            install_labels(cls, quiet=False, stdout=stdout)
+            i += 1
+    
+        if i:
             stdout.write("\n")
+    
+        stdout.write(f"Finished {i} classes.\n")
+
 
 
     @ensure_connection
