@@ -269,55 +269,40 @@ class Database(local):
             aliases=False, rels=True, properties=False
         ).items():
             _install_relationship(cls, relationship, quiet, stdout)
-    
-    
-    def _create_node_index(label: str, property_name: str, stdout):
-        try:
-            db.cypher_query(
-                f"CREATE INDEX index_{label}_{property_name} FOR (n:{label}) ON (n.{property_name}); "
-            )
-        except ClientError as e:
-            if e.code in (
-                RULE_ALREADY_EXISTS,
-                INDEX_ALREADY_EXISTS,
-            ):
-                stdout.write(f"{str(e)}\n")
-            else:
-                raise
-    
-    
-    def _create_node_constraint(label: str, property_name: str, stdout):
-        try:
-            db.cypher_query(
-                f"""CREATE CONSTRAINT constraint_unique_{label}_{property_name} 
-                            FOR (n:{label}) REQUIRE n.{property_name} IS UNIQUE"""
-            )
-        except ClientError as e:
-            if e.code in (
-                RULE_ALREADY_EXISTS,
-                CONSTRAINT_ALREADY_EXISTS,
-            ):
-                stdout.write(f"{str(e)}\n")
-            else:
-                raise
-    
-    
-    def _create_relationship_index(relationship_type: str, property_name: str, stdout):
-        try:
-            db.cypher_query(
-                f"CREATE INDEX index_{relationship_type}_{property_name} FOR ()-[r:{relationship_type}]-() ON (r.{property_name}); "
-            )
-        except ClientError as e:
-            if e.code in (
-                RULE_ALREADY_EXISTS,
-                INDEX_ALREADY_EXISTS,
-            ):
-                stdout.write(f"{str(e)}\n")
-            else:
-                raise
-    
+
     
     def _install_node(cls, name, property, quiet, stdout):
+
+        def _create_node_index(label: str, property_name: str, stdout):
+            try:
+                db.cypher_query(
+                    f"CREATE INDEX index_{label}_{property_name} FOR (n:{label}) ON (n.{property_name}); "
+                )
+            except ClientError as e:
+                if e.code in (
+                    RULE_ALREADY_EXISTS,
+                    INDEX_ALREADY_EXISTS,
+                ):
+                    stdout.write(f"{str(e)}\n")
+                else:
+                    raise
+        
+        
+        def _create_node_constraint(label: str, property_name: str, stdout):
+            try:
+                db.cypher_query(
+                    f"""CREATE CONSTRAINT constraint_unique_{label}_{property_name} 
+                                FOR (n:{label}) REQUIRE n.{property_name} IS UNIQUE"""
+                )
+            except ClientError as e:
+                if e.code in (
+                    RULE_ALREADY_EXISTS,
+                    CONSTRAINT_ALREADY_EXISTS,
+                ):
+                    stdout.write(f"{str(e)}\n")
+                else:
+                    raise
+
         # Create indexes and constraints for node property
         db_property = property.db_property or name
         if property.index:
@@ -340,6 +325,20 @@ class Database(local):
     
     
     def _install_relationship(cls, relationship, quiet, stdout):
+        def _create_relationship_index(relationship_type: str, property_name: str, stdout):
+            try:
+                db.cypher_query(
+                    f"CREATE INDEX index_{relationship_type}_{property_name} FOR ()-[r:{relationship_type}]-() ON (r.{property_name}); "
+                )
+            except ClientError as e:
+                if e.code in (
+                    RULE_ALREADY_EXISTS,
+                    INDEX_ALREADY_EXISTS,
+                ):
+                    stdout.write(f"{str(e)}\n")
+                else:
+                    raise
+
         # Create indexes and constraints for relationship property
         relationship_cls = relationship.definition["model"]
         if relationship_cls is not None:
